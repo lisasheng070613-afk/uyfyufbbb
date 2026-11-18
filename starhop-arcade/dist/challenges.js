@@ -504,6 +504,7 @@ function drawDive(c,d,t) {
       }
     }
   }
+  drawDiveDetails(c,camX,camY,t);
   for (const h of diveHats) {
     const x=h.x-camX,y=h.y-camY;
     if (x<-25 || x>W+25 || y<-30 || y>H+30) continue;

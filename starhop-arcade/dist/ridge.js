@@ -1,13 +1,17 @@
 "use strict";
 
-const summitAttacks=["charge","slam","charge","slam","charge","slam"];
-const summitSlamRadius=71;
+const summitAttacks=["charge","slam","charge","slam","charge","slam","charge","slam"];
+const summitPaces=[
+  {chargeCue:54,speed:13.4,slamCue:53,slamFrames:38,radius:78,recovery:36},
+  {chargeCue:42,speed:15.1,slamCue:43,slamFrames:34,radius:96,recovery:29}
+];
+const summitPace=b=>summitPaces[Number(b.attack>=summitAttacks.length/2)];
 
 function buildRidge(data,ledges) {
   const arena=ledges.at(-1);
   const elite={
     x:arena.x+arena.w-92,y:arena.y,stage:"waiting",frame:0,attack:0,
-    from:0,target:0,dir:-1,shieldFlash:0,impact:0,key:null
+    from:0,target:0,dir:-1,shieldFlash:0,impact:0,key:null,slamRadius:summitPaces[0].radius
   };
   const drakes=data.drakes.map(([x,y,range],i)=>({
     x,y,baseX:x,baseY:y,range,phase:i*1.94,w:36,h:23,
@@ -33,7 +37,7 @@ function refreshRidgeHud() {
   }
   const {elite}=scene.ridge;
   const eliteActive=elite.stage!=="waiting";
-  const label=eliteActive?"山脊牛头人":"攀登高度";
+  const label=eliteActive?(elite.attack>=summitAttacks.length/2?"牛头人 · 狂暴":"山脊牛头人"):"攀登高度";
   const value=elite.stage==="key"?"拾取钥匙":elite.stage==="exit"?"前往高塔":
     eliteActive?elite.attack+" / "+summitAttacks.length:
     Math.round(clamp((scene.ground[0].y-player.y-player.h)/10,0,147))+" m";
@@ -50,7 +54,7 @@ function updateRidge() {
     setRidgeCheckpoint(ridge.checkpoints.at(-1));
     ridge.elite.stage="intro";
     ridge.rocks=[];
-    showToast("山脊牛头人 · 撑过六次攻击，拿到钥匙",142);
+    showToast("山脊牛头人 · 撑过八次攻击，拿到钥匙",142);
     sound("save");
   }
   if (ridge.elite.stage!=="waiting") {
@@ -145,9 +149,10 @@ function nextSummitAttack(ridge) {
     b.dir=b.x>center?-1:1;
     b.target=b.dir<0?a.x+38:a.x+a.w-38;
     b.stage="chargeCue";
-    showToast("冲撞预警 · 看准时机跳过去！",102);
+    showToast(b.attack===summitAttacks.length/2?"牛头人加速 · 提前起跳躲冲撞！":"冲撞预警 · 看准时机跳过去！",102);
   } else {
     b.target=clamp(p.x+p.w/2,a.x+56,a.x+a.w-56);
+    b.slamRadius=summitPace(b).radius;
     b.dir=Math.sign(b.target-b.x)||b.dir;
     b.stage="slamCue";
     showToast("砸击预警 · 离开橙色落点！",105);
@@ -163,6 +168,7 @@ function finishSummitAttack(b) {
 
 function updateSummit(ridge) {
   const a=ridge.arena, b=ridge.elite, p=player;
+  const pace=summitPace(b);
   b.frame++;
   if (b.shieldFlash>0) b.shieldFlash--;
   if (b.impact>0) b.impact--;
@@ -171,25 +177,25 @@ function updateSummit(ridge) {
       if (b.frame>=74) nextSummitAttack(ridge);
       break;
     case "chargeCue":
-      if (b.frame>=61) { b.stage="charge"; b.frame=0; }
+      if (b.frame>=pace.chargeCue) { b.stage="charge"; b.frame=0; }
       break;
     case "charge":
-      b.x+=b.dir*Math.min(11.8,Math.abs(b.target-b.x));
+      b.x+=b.dir*Math.min(pace.speed,Math.abs(b.target-b.x));
       if (overlap(p,summitBody(b))) hit(b.dir);
       if (Math.abs(b.target-b.x)<.01) finishSummitAttack(b);
       break;
     case "slamCue":
-      if (b.frame>=59) { b.stage="slam"; b.frame=0; }
+      if (b.frame>=pace.slamCue) { b.stage="slam"; b.frame=0; }
       break;
     case "slam": {
-      const portion=Math.min(1,b.frame/40);
+      const portion=Math.min(1,b.frame/pace.slamFrames);
       b.x=b.from+(b.target-b.from)*portion;
       b.y=a.y-480*portion*(1-portion);
       if (portion===1) {
         b.impact=22;
         burst(b.x,a.y-4,"#f3ba89",17);
         sound("land");
-        if (Math.abs(p.x+p.w/2-b.x)<summitSlamRadius && p.y+p.h>a.y-29) {
+        if (Math.abs(p.x+p.w/2-b.x)<b.slamRadius && p.y+p.h>a.y-29) {
           hit(Math.sign(p.x+p.w/2-b.x)||-1);
         }
         finishSummitAttack(b);
@@ -197,7 +203,7 @@ function updateSummit(ridge) {
       break;
     }
     case "recover":
-      if (b.frame>=39) nextSummitAttack(ridge);
+      if (b.frame>=pace.recovery) nextSummitAttack(ridge);
       break;
     case "key":
       if (Math.abs(p.x+p.w/2-b.key.x)<25 && Math.abs(p.y+16-b.key.y)<38) {
@@ -300,6 +306,7 @@ function drawRidgeShelf(c,s,camX,camY,summit) {
 
 function drawRidgeTerrain(c,ridge,camX,camY,t) {
   ridgeScenery(c,camX,camY,t);
+  drawLandscapeDetails(c,5,camX,camY,t);
   drawRidgeShelf(c,scene.ground[0],camX,camY,false);
   for (const s of scene.ledges) drawRidgeShelf(c,s,camX,camY,s===ridge.arena);
   const a=ridge.arena, y=a.y-camY;
@@ -372,8 +379,8 @@ function drawMinotaur(c,b,a,camX,camY,t) {
   const y=a.y-camY, x=b.x-camX;
   if (b.stage==="chargeCue" || b.stage==="charge") {
     const start=Math.min(b.x,b.target)-camX, end=Math.max(b.x,b.target)-camX;
-    const lit=b.stage==="chargeCue"?b.frame:61;
-    c.globalAlpha=.26+lit*.006;
+    const lit=b.stage==="chargeCue"?b.frame/summitPace(b).chargeCue:1;
+    c.globalAlpha=.26+lit*.37;
     rect(c,start,y-6,end-start,6,"#ff6674");
     c.globalAlpha=1;
     for (let xx=start+17;xx<end-12;xx+=34) {
@@ -383,10 +390,10 @@ function drawMinotaur(c,b,a,camX,camY,t) {
   if (b.stage==="slamCue" || b.stage==="slam" || b.impact) {
     const center=b.target-camX, bright=(b.impact?b.impact:12);
     c.globalAlpha=.23+bright*.018;
-    rect(c,center-summitSlamRadius,y-8,summitSlamRadius*2,8,"#ffad69");
+    rect(c,center-b.slamRadius,y-8,b.slamRadius*2,8,"#ffad69");
     c.globalAlpha=1;
-    rect(c,center-summitSlamRadius,y-8,3,8,"#ffdb91");
-    rect(c,center+summitSlamRadius-3,y-8,3,8,"#ffdb91");
+    rect(c,center-b.slamRadius,y-8,3,8,"#ffdb91");
+    rect(c,center+b.slamRadius-3,y-8,3,8,"#ffdb91");
     polygon(c,[[center-8,y-23],[center+8,y-23],[center,y-12]],"#ffe09d");
     if (b.impact) {
       rect(c,center-30-(22-b.impact)*3,y-16,13,3,"#ffe1b4");
@@ -397,7 +404,7 @@ function drawMinotaur(c,b,a,camX,camY,t) {
   const fallen=b.stage==="key" || b.stage==="exit";
   const step=b.stage==="charge"?(Math.floor(t/3)%2===0?-5:5):0;
   const pose=b.stage==="slam" || b.stage==="slamCue"?-11:0;
-  const outline="#352536", rust="#8d4c4c", dark="#673942", red="#be6656", high="#db8b68";
+  const outline="#362b37", rust="#94633e", dark="#6f4739", red="#b97a46", high="#e39462";
   rect(c,x-32,y-4,64,4,"#36466f");
   c.save();
   c.translate(Math.round(x),Math.round(b.y-camY+(fallen?13:0)));
@@ -429,22 +436,7 @@ function drawMinotaur(c,b,a,camX,camY,t) {
   polygon(c,[[42,-70+pose],[54,-76+pose],[57,-70+pose],[57,-58+pose],[53,-55+pose],[43,-62+pose]],"#bcadad");
   rect(c,52,-70+pose,4,10,"#e7d6c6");
 
-  polygon(c,[[-20,-69],[-28,-71],[-34,-78],[-36,-91],[-31,-90],[-27,-81],[-18,-80]],outline);
-  polygon(c,[[18,-80],[27,-81],[32,-90],[37,-91],[35,-78],[29,-71],[20,-69]],outline);
-  polygon(c,[[-21,-73],[-27,-74],[-31,-80],[-33,-87],[-30,-86],[-26,-79],[-21,-78]],"#f2d9b1");
-  polygon(c,[[21,-78],[27,-79],[31,-86],[34,-87],[32,-80],[28,-74],[21,-73]],"#efd0a3");
-  rect(c,-22,-78,44,23,outline);
-  rect(c,-17,-82,34,6,outline);
-  rect(c,-18,-76,36,20,red);
-  rect(c,-12,-78,24,5,rust);
-  rect(c,-17,-69,16,5,dark);
-  rect(c,1,-69,16,5,dark);
-  rect(c,-10+2*b.dir,-67,4,3,"#ffde7b");
-  rect(c,7+2*b.dir,-67,4,3,"#ffde7b");
-  rect(c,-13,-61,26,13,outline);
-  rect(c,-10,-61,20,10,high);
-  rect(c,-6,-57,4,3,dark);
-  rect(c,3,-57,4,3,dark);
+  drawMinotaurHead(c,b.dir,t);
 
   if (!fallen) {
     const rim=b.shieldFlash?"#fff1be":"#d9976a";
@@ -471,4 +463,58 @@ function drawRidgeActors(c,ridge,camX,camY,t) {
   for (const e of ridge.drakes) drawDrake(c,e,camX,camY,t);
   for (const rock of ridge.rocks) drawRidgeRock(c,rock,camX,camY);
   drawMinotaur(c,ridge.elite,ridge.arena,camX,camY,t);
+}
+
+function drawMinotaurHead(c,direction,t) {
+  const shadow="#493345", horn="#62505a";
+  const ochre="#cc8e3e", gold="#e2a548", shine="#edb858", ear="#a36642";
+  polygon(c,[[-23,-93],[-35,-99],[-43,-112],[-44,-124],[-40,-130],[-33,-128],[-30,-115],[-23,-108],[-15,-103]],shadow);
+  polygon(c,[[-25,-96],[-35,-104],[-40,-116],[-40,-126],[-35,-125],[-32,-116],[-27,-110],[-20,-106]],horn);
+  rect(c,-39,-121,3,7,"#917879");
+  polygon(c,[[20,-102],[31,-106],[38,-117],[41,-127],[46,-128],[49,-123],[47,-111],[40,-100],[29,-93]],shadow);
+  polygon(c,[[23,-103],[32,-109],[42,-124],[46,-125],[45,-116],[39,-105],[31,-99]],horn);
+  rect(c,40,-118,4,4,"#927b78");
+
+  polygon(c,[[-24,-103],[-30,-92],[-46,-93],[-55,-106],[-47,-103],[-37,-106]],ear);
+  polygon(c,[[25,-100],[35,-105],[49,-104],[54,-106],[48,-94],[34,-94],[28,-91]],ear);
+  polygon(c,[[-48,-102],[-38,-102],[-32,-96],[-43,-97]],"#deac8a");
+  polygon(c,[[36,-101],[47,-102],[44,-97],[36,-96]],"#dca37a");
+
+  polygon(c,[[-31,-94],[-26,-106],[-14,-114],[12,-115],[27,-106],[33,-94],[32,-78],[27,-66],
+    [25,-56],[15,-46],[-16,-46],[-26,-56],[-28,-70],[-32,-82]],shadow);
+  polygon(c,[[-28,-94],[-22,-105],[-13,-111],[12,-112],[25,-104],[30,-92],[29,-78],[24,-67],
+    [21,-58],[11,-52],[-14,-53],[-22,-59],[-23,-72],[-27,-82]],ochre);
+  polygon(c,[[-24,-95],[-20,-105],[-11,-108],[12,-110],[22,-103],[27,-94],[24,-82],[19,-69],
+    [11,-61],[-13,-62],[-19,-71],[-25,-82]],gold);
+  polygon(c,[[-22,-100],[-13,-107],[-4,-108],[9,-108],[13,-104],[-3,-100],[-12,-95],[-21,-92]],shine);
+  const flecks=[[-17,-101,3],[-13,-96,4],[-21,-86,3],[17,-101,4],[15,-94,4],[23,-83,3],[-21,-73,5],[18,-73,3],[-12,-76,3],[5,-101,4]];
+  for (const [x,y,w] of flecks) rect(c,x,y,w,2,y%2?"#edb153":"#bd813c");
+  sceneLine(c,[[-21,-91],[-15,-94],[-5,-93],[-2,-91]],"#81513e",2);
+  sceneLine(c,[[3,-91],[9,-93],[19,-94],[24,-91]],"#81513e",2);
+
+  polygon(c,[[-20,-83],[-17,-87],[-8,-87],[-3,-83],[-7,-80],[-17,-81]],"#f8debc");
+  polygon(c,[[4,-83],[9,-87],[19,-87],[23,-84],[21,-81],[9,-80]],"#fae5c6");
+  const blink=t%143>137;
+  if (blink) {
+    rect(c,-18,-84,14,3,"#94623e");
+    rect(c,6,-84,15,3,"#94623e");
+  } else {
+    rect(c,-12+direction*2,-85,6,5,"#392b36");
+    rect(c,13+direction*2,-85,6,5,"#392b36");
+    rect(c,-21,-88,18,2,"#b17a3d");
+    rect(c,4,-88,21,2,"#b17a3d");
+  }
+
+  polygon(c,[[-24,-64],[-20,-72],[-10,-75],[1,-73],[12,-75],[21,-70],[26,-62],[24,-54],
+    [15,-47],[4,-44],[-11,-45],[-20,-50]],"#774b51");
+  polygon(c,[[-21,-64],[-17,-70],[-9,-72],[1,-70],[11,-72],[19,-68],[23,-62],[20,-55],
+    [13,-50],[4,-47],[-12,-48],[-18,-53]],"#dba093");
+  polygon(c,[[-18,-65],[-14,-69],[-8,-69],[0,-67],[8,-69],[16,-68],[20,-64],[16,-60],
+    [6,-61],[-6,-60],[-15,-61]],"#efb9ab");
+  rect(c,-10,-65,5,2,"#7c4b53");
+  rect(c,6,-65,5,2,"#7c4b53");
+  rect(c,-7,-63,3,2,"#95605d");
+  rect(c,4,-63,3,2,"#95605d");
+  sceneLine(c,[[-16,-56],[-10,-54],[0,-53],[10,-54],[17,-58]],"#845255",2);
+  rect(c,-8,-51,15,2,"#e7aa9d");
 }

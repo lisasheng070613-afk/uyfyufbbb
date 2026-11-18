@@ -201,3 +201,24 @@ ol { display:grid; gap:6px; list-style:none; margin:0; padding:0 }
 .ridge-hud span { font:800 11px ui-monospace,monospace; color:#e1f7a9; white-space:nowrap }
 .ridge-hud.elite { background:#3e2738f2; border-color:#c27c68; color:#ffdac7 }
 @media (max-width:470px) { .ridge-hud { top:6px; right:6px; padding:4px 6px; gap:5px; font-size:9px } .ridge-hud span { font-size:9px } }
+
+.chase-hud,.web-prompt { position:absolute; z-index:2; background:#25243aec; border:1px solid #897eaa; border-radius:7px; color:#f3e8ff }
+.chase-hud { right:13px; top:13px; width:min(28%,154px); min-width:92px; padding:6px 8px; font-size:11px; pointer-events:none }
+.chase-hud>div:first-child,.web-prompt>div:first-child { display:flex; justify-content:space-between; align-items:center; gap:8px; margin-bottom:5px }
+.chase-hud span { color:#e7ccf3; font:800 11px ui-monospace,monospace }
+.chase-track { height:5px; background:#503752; border-radius:5px; overflow:hidden }
+.chase-track i { display:block; height:100%; border-radius:5px; background:#dcc6ff }
+.chase-hud.danger { border-color:#ff7fa8; background:#4a253cec }
+.chase-hud.danger i { background:#ff779f }
+.web-prompt { top:calc(17% + 34px); left:50%; transform:translateX(-50%); min-width:111px; padding:7px 9px; border-color:#d6addd; background:#322241f2; font-size:12px }
+.web-prompt kbd { color:#25203a; background:#f6ddff; border-color:#e8abf2; font-size:16px }
+.web-prompt i { background:#fad5f5 }
+.web-buttons { display:none; gap:3px; margin-top:6px }
+.web-buttons button { min-width:31px; height:34px; padding:0; border:1px solid #be8dbd; border-radius:4px; color:#fff3ff; background:#533459; font-weight:900; touch-action:manipulation }
+@media (pointer:coarse) { .web-buttons { display:flex } }
+@media (max-width:470px) {
+  .chase-hud { top:6px; right:6px; padding:4px 6px; font-size:9px }
+  .chase-hud span { font-size:9px }
+  .web-prompt { padding:4px 6px; font-size:10px }
+  .web-prompt kbd { height:19px; font-size:14px }
+}

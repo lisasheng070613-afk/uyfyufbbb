@@ -165,10 +165,11 @@ function buildScene(index) {
   const floodgate=stage.floodgate?{...stage.floodgate,key:false,countdown:null}:null;
   const traps=createTraps(stage);
   const ridge=stage.ridge?buildRidge(stage.ridge,ledges):null;
+  const chase=stage.spiderChase?buildForestChase(stage.spiderChase,end.x+end.w-115):null;
   moveTraps(traps,0);
   return {
     stage,ground,ledges,solids:[...ground,...ledges],hazards,traps,enemies,gems,width:end.x+end.w,height,
-    gate:boss||floodgate||ridge?null:{x:end.x+end.w-115,y:end.y},boss,bridge,floodgate,ridge,dive:null
+    gate:boss||floodgate||ridge?null:{x:end.x+end.w-115,y:end.y},boss,bridge,floodgate,ridge,chase,dive:null
   };
 }
 
@@ -214,6 +215,7 @@ function syncState(label) {
   ui.stageGoal.textContent=scene.ridge?"攀上山顶，取得山脊钥匙":"收集星砂，抵达星门";
   updateChallengeHud();
   refreshRidgeHud();
+  syncForestChase();
 }
 function setupTitle(index=Math.max(0,nextUncleared())) {
   if (!canEnterLevel(index)) index=Math.max(0,nextUncleared());
@@ -347,7 +349,7 @@ function hit(away,damage=1) {
   if (player.hp<=0) fail();
 }
 function fire() {
-  if (player.cooldown>0) return;
+  if (player.cooldown>0 || forestChaseActive()) return;
   const x=player.x+10, y=player.y+14;
   const target=pointer
     ? {x:pointer.x+camera,y:pointer.y+cameraY}
@@ -367,7 +369,7 @@ function aimEvent(event) {
 }
 canvas.addEventListener("pointermove",event=>{ if (event.pointerType!=="touch") aimEvent(event); });
 canvas.addEventListener("pointerdown",event=>{
-  if (event.button!==0 || event.pointerType==="touch" || mode!=="play" || scene.dive || scene.floodgate?.key) return;
+  if (event.button!==0 || event.pointerType==="touch" || mode!=="play" || scene.dive || scene.floodgate?.key || forestChaseActive()) return;
   event.preventDefault();
   aimEvent(event);
   firing=true;
@@ -398,6 +400,14 @@ window.addEventListener("keydown",event=>{
     return;
   }
   if (mode!=="play") return;
+  if (forestChaseActive()) {
+    if (webMarks[event.code]) {
+      event.preventDefault();
+      if (!event.repeat) dodgeForestWeb(event.code);
+      return;
+    }
+    if (event.code!=="KeyD" && event.code!=="Space") return;
+  }
   if (event.code==="KeyE") {
     event.preventDefault();
     if (!event.repeat) useInteraction();
@@ -428,12 +438,17 @@ function updatePlayer() {
   const p=player;
   if (p.inv>0) p.inv--;
   if (p.cooldown>0) p.cooldown--;
-  const left=keys.has("KeyA") || keys.has("ArrowLeft");
-  const right=keys.has("KeyD") || keys.has("ArrowRight");
+  const chasing=scene.chase?.phase==="run";
+  const left=!chasing && (keys.has("KeyA") || keys.has("ArrowLeft"));
+  const right=keys.has("KeyD") || (!chasing && keys.has("ArrowRight"));
   const input=Number(right)-Number(left);
   const icy=scene.ridge && p.on && p.on!==scene.ridge.arena;
   if (input) p.dir=input;
-  p.vx=input ? clamp(p.vx+input*(icy?.44:.85),-4.65,4.65) : p.vx*(icy?.92:.78);
+  if (chasing) {
+    p.vx=clamp(input?p.vx+.85:p.vx*.73,0,forestRunSpeed());
+  } else {
+    p.vx=input ? clamp(p.vx+input*(icy?.44:.85),-4.65,4.65) : p.vx*(icy?.92:.78);
+  }
   if (p.on) {
     p.x+=p.on.x-p.on.oldX;
     p.y+=p.on.y-p.on.oldY;
@@ -638,7 +653,7 @@ function updateShots() {
 function horizontalCameraTarget() {
   const a=scene.ridge?.arena;
   const atSummit=a && (scene.ridge.elite.stage!=="waiting" || player.y+player.h<=a.y+6);
-  return clamp(atSummit?a.x+(a.w-W)/2:player.x-237,0,scene.width-W);
+  return clamp(atSummit?a.x+(a.w-W)/2:player.x-(forestChaseActive()?267:237),0,scene.width-W);
 }
 function verticalCameraTarget() {
   const ridge=scene.ridge;
@@ -651,7 +666,12 @@ function step() {
   if (mode==="rhythm") { updateRhythm(); return; }
   if (mode!=="play") return;
   if (scene.dive) { updateDive(); return; }
-  if (updateGateTransition()) return;
+  if (updateGateTransition() || startForestChase()) return;
+  if (scene.chase?.phase==="intro") {
+    updateForestIntro();
+    camera+=clamp((horizontalCameraTarget()-camera)*.12,-12,12);
+    return;
+  }
   age++;
   moveTraps(scene.traps,age);
   for (const s of scene.ledges) {
@@ -661,7 +681,9 @@ function step() {
     if (s.axis==="y") s.y=s.baseY+travel;
   }
   updatePlayer();
-  if (mode!=="play" || updateSurfaceChallenges()) return;
+  if (mode!=="play" || updateSurfaceChallenges() || startForestChase()) return;
+  if (scene.chase?.phase==="run") updateForestChase();
+  if (mode!=="play") return;
   if (scene.boss) updateBoss();
   else updateLevel();
   if (mode!=="play") return;
@@ -685,9 +707,11 @@ function draw() {
   if (scene.ridge) drawRidgeTerrain(ctx,scene.ridge,cam,camY,t);
   else {
     scenery(ctx,selected,cam,t);
+    drawLandscapeDetails(ctx,selected,cam,camY,t);
     if (scene.floodgate) drawFloodgate(ctx,scene.floodgate,cam,t);
     for (const g of scene.ground) {
       tile(ctx,g,p,cam);
+      drawStageSurfaceDetail(ctx,selected,g,cam);
       const start=Math.max(0,Math.floor((cam-g.x)/69));
       for (let i=start;selected!==2 && g.x+i*69+27<Math.min(g.x+g.w-5,cam+W+20);i++) {
         const x=g.x+i*69+27;
@@ -702,6 +726,7 @@ function draw() {
       }
     }
   }
+  if (scene.chase) drawForestMud(ctx,scene.chase,cam,t);
   for (const h of scene.hazards) drawSpikes(ctx,h.x-cam,h.y-camY,h.w,h.h);
   if (scene.traps.length) drawMineTraps(ctx,scene.traps,cam,t);
   if (scene.bridge) drawBridge(ctx,scene.bridge,cam);
@@ -744,11 +769,14 @@ function draw() {
   for (const e of scene.enemies) if (e.alive && e.x>cam-30 && e.x<cam+W+30) enemySprite(ctx,e,cam,t,camY);
   if (scene.boss) drawBoss(t);
   if (scene.ridge) drawRidgeActors(ctx,scene.ridge,cam,camY,t);
+  if (scene.chase) drawForestChase(ctx,scene.chase,cam,t);
   for (const s of shots) {
     rect(ctx,s.x-cam-s.vx*.8,s.y-camY-s.vy*.8,6,4,"#99b7df");
     sparkle(ctx,s.x-cam,s.y-camY,6,"#dbfff6");
   }
-  playerSprite(ctx,player.x+10-cam,player.y+32-camY,player.dir,t,Math.abs(player.vx)>.6,!player.on&&mode==="play",player.inv>0);
+  const lean=scene.chase?.lean>0?scene.chase.lean/9:0;
+  const [dodgeX,dodgeY]=lean?webMotion[scene.chase.dodgeArrow]:[0,0];
+  playerSprite(ctx,player.x+10-cam+dodgeX*lean,player.y+32-camY+dodgeY*lean,player.dir,t,Math.abs(player.vx)>.6,!player.on&&mode==="play",player.inv>0);
   for (const pt of particles) {
     ctx.globalAlpha=Math.min(1,pt.life/10);
     rect(ctx,pt.x-cam,pt.y-camY,3,3,pt.color);
@@ -804,6 +832,7 @@ function drawBoss(t) {
 
 refreshSound();
 initChallengeControls();
+initForestControls();
 setupTitle();
 let previous=0, accumulator=0;
 function frame(time) {
