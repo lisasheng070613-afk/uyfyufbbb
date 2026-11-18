@@ -6,7 +6,7 @@ const ctx=canvas.getContext("2d");
 const ui=Object.fromEntries([
   "cabinet","screen","zone","worldName","status","pause","hud","stars","hearts","bossHud","bossPhase","bossFill","toast",
   "overlay","eyebrow","overlayTitle","overlayText","primary","primaryText","secondary","touch","stageTag",
-  "progressText","progressFill","levelList","sound","fullscreen"
+  "progressText","progressFill","levelList","sound","fullscreen","mapAccess","stageGoal","ridgeHud","ridgeLabel","ridgeValue"
 ].map(id=>[id,byId(id)]));
 
 const storage = {
@@ -17,16 +17,20 @@ const storage = {
     try { localStorage.setItem("starhop."+key,value); } catch {}
   }
 };
-let record = { unlocked:0, cleared:[] };
+const record={cleared:[]};
 try {
   const saved=JSON.parse(storage.get("progress"));
-  if (saved && Array.isArray(saved.cleared)) {
-    record = {
-      unlocked:clamp(parseInt(saved.unlocked,10)||0,0,7),
-      cleared:[...new Set(saved.cleared.filter(i=>Number.isInteger(i)&&i>=0&&i<8))]
-    };
+  if (Array.isArray(saved?.cleared)) {
+    record.cleared=[...new Set(saved.cleared.filter(i=>Number.isInteger(i)&&i>=0&&i<stages.length))];
   }
 } catch {}
+function nextUncleared() {
+  return stages.findIndex((_,index)=>!record.cleared.includes(index));
+}
+function canEnterLevel(index) {
+  const next=nextUncleared();
+  return Number.isInteger(index) && index>=0 && index<stages.length && (next<0 || index===next);
+}
 let muted = storage.get("muted")==="true";
 let audioContext;
 function sound(name) {
@@ -88,7 +92,7 @@ bossImage.addEventListener("load",()=>{
 bossImage.src="./boss.webp";
 const keys=new Set();
 let pointer=null, firing=false;
-let selected=0, mode="title", scene, player, tick=0, age=0, camera=0;
+let selected=0, mode="title", scene, player, tick=0, age=0, camera=0, cameraY=0;
 let particles=[], shots=[], orbs=[], collected=0, checkpoint=null, stageCollected=new Set();
 let jumpQueue=0, toastUntil=0, primaryAction, secondaryAction, resumeAfterPause="play";
 
@@ -98,26 +102,29 @@ const colors=[
   ["#372a54","#644c82","#d9baf5"],["#4b294a","#8d507b","#ffabd7"]
 ];
 function renderMap() {
-  ui.progressText.textContent=record.cleared.length+" / 8";
-  ui.progressFill.style.width=record.cleared.length/8*100+"%";
+  ui.progressText.textContent=record.cleared.length+" / "+stages.length;
+  ui.progressFill.style.width=record.cleared.length/stages.length*100+"%";
+  ui.mapAccess.textContent=nextUncleared()<0?"已开放自由选关":"按顺序解锁，全部通关后可自由选关";
   ui.levelList.replaceChildren();
   stages.forEach((stage,index)=>{
-    const active=selected===index;
+    const available=canEnterLevel(index);
+    const active=selected===index && available;
     const complete=record.cleared.includes(index);
-    const available=index<=record.unlocked;
     const li=document.createElement("li");
     const button=document.createElement("button");
     button.type="button";
     button.className=["level",active?"active":"",complete?"done":"",index===7?"final":""].filter(Boolean).join(" ");
     button.disabled=!available;
     if (active) button.setAttribute("aria-current","step");
-    button.setAttribute("aria-label","第"+(index+1)+"关 "+stage.name+(complete?"，已完成":available?"":"，未解锁"));
+    const availability=complete?(available?"，已完成":"，已完成，全部通关后可重玩"):available?"，可进入":"，未解锁";
+    button.setAttribute("aria-label","第"+(index+1)+"关 "+stage.name+availability);
     const [shade,outline,ink]=colors[index];
     button.style.setProperty("--swatch",shade);
     button.style.setProperty("--swatch-border",outline);
     button.style.setProperty("--swatch-ink",ink);
-    button.innerHTML='<span class="level-icon">'+pixelIcon(stage)+'</span><span class="level-text"><strong>'+stage.name+'</strong><small>'+String(index+1).padStart(2,"0")+" · "+stage.en+'</small></span><span class="level-status">'+icon(complete?"check":active||available?"play":"lock")+'</span>';
+    button.innerHTML='<span class="level-icon">'+pixelIcon(stage)+'</span><span class="level-text"><strong>'+stage.name+'</strong><small>'+String(index+1).padStart(2,"0")+" · "+stage.en+'</small></span><span class="level-status">'+icon(available?(complete?"check":"play"):"lock")+'</span>';
     button.onclick=()=>{
+      if (!canEnterLevel(index)) return;
       if (mode==="title" && selected===index) startStage(index);
       else if (selected!==index || !["play","rhythm"].includes(mode)) setupTitle(index);
       else canvas.focus();
@@ -131,13 +138,18 @@ function renderMap() {
 
 function buildScene(index) {
   const stage=stages[index];
-  const ground=stage.terrain.map(([x,y,w])=>({x,y,w,h:H+65-y,ground:true,oldX:x,oldY:y}));
+  const height=stage.ridge?.height??H;
+  const ground=stage.terrain.map(([x,y,w])=>({x,y,w,h:height+65-y,ground:true,oldX:x,oldY:y}));
   const ledges=stage.ledges.map(([x,y,w,axis,range],i)=>({x,y,w,h:24,baseX:x,baseY:y,oldX:x,oldY:y,axis,range,phase:i*.85}));
   const hazards=stage.spikes.map(([x,y,w])=>({x,y:y-15,w,h:15}));
-  const enemies=stage.enemies.map((x,i)=>{
-    const home=ground.find(g=>x>=g.x && x+26<=g.x+g.w);
-    return { x,y:home.y-22,w:26,h:22,min:Math.max(home.x+8,x-54),max:Math.min(home.x+home.w-34,x+67),dir:i%2?-1:1,alive:true };
+  const walker=(x,home,i)=>({
+    x,y:home.y-22,w:26,h:22,min:Math.max(home.x+8,x-54),
+    max:Math.min(home.x+home.w-34,x+67),dir:i%2?-1:1,alive:true
   });
+  const enemies=stage.enemies.map((x,i)=>walker(x,ground.find(g=>x>=g.x && x+26<=g.x+g.w),i));
+  if (stage.ridge) {
+    stage.ridge.roamers.forEach(([index,x],i)=>enemies.push(walker(x,ledges[index],i)));
+  }
   const gems=[];
   for (const g of ground) {
     for (let x=g.x+125;x<g.x+g.w-32;x+=54) {
@@ -152,10 +164,11 @@ function buildScene(index) {
   const bridge=stage.bridge?{...stage.bridge,open:false,lowering:null,rhythm:null}:null;
   const floodgate=stage.floodgate?{...stage.floodgate,key:false,countdown:null}:null;
   const traps=createTraps(stage);
+  const ridge=stage.ridge?buildRidge(stage.ridge,ledges):null;
   moveTraps(traps,0);
   return {
-    stage,ground,ledges,solids:[...ground,...ledges],hazards,traps,enemies,gems,width:end.x+end.w,
-    gate:boss||floodgate?null:{x:end.x+end.w-115,y:end.y},boss,bridge,floodgate,dive:null
+    stage,ground,ledges,solids:[...ground,...ledges],hazards,traps,enemies,gems,width:end.x+end.w,height,
+    gate:boss||floodgate||ridge?null:{x:end.x+end.w-115,y:end.y},boss,bridge,floodgate,ridge,dive:null
   };
 }
 
@@ -197,15 +210,20 @@ function syncState(label) {
   ui.touch.hidden=mode!=="play";
   ui.hud.hidden=mode==="title";
   ui.bossHud.hidden=mode==="title" || !scene.boss;
-  ui.stageTag.innerHTML=selected===7?"终幕 <i></i> 弹幕对决":"横版冒险 <i></i> 08 关卡";
+  ui.stageTag.innerHTML=selected===7?"终幕 <i></i> 弹幕对决":scene.ridge?"霜月山脊 <i></i> 垂直攀登":"横版冒险 <i></i> 08 关卡";
+  ui.stageGoal.textContent=scene.ridge?"攀上山顶，取得山脊钥匙":"收集星砂，抵达星门";
   updateChallengeHud();
+  refreshRidgeHud();
 }
-function setupTitle(index=0) {
+function setupTitle(index=Math.max(0,nextUncleared())) {
+  if (!canEnterLevel(index)) index=Math.max(0,nextUncleared());
   selected=index;
   mode="title";
   scene=buildScene(index);
   player=newPlayer(index===0?295:67,scene.ground[0].y,3);
   age=camera=collected=0;
+  cameraY=verticalCameraTarget();
+  checkpoint=null;
   particles=[]; shots=[]; orbs=[];
   stageCollected=new Set();
   ui.toast.hidden=true;
@@ -216,11 +234,12 @@ function setupTitle(index=0) {
     tag:index===0?"STARHOP ARCADE":stages[index].en,
     title:index===0?"星跃冒险":index===7?"星铃守卫":stages[index].name,
     text:index===0?"穿越七片星野，迎战最后的弹幕守卫。":stages[index].hint,
-    button:index===0?"开始冒险":index===7?"挑战守卫":"进入关卡",
+    button:index===0?"开始冒险":index===7?"挑战守卫":record.cleared.length && nextUncleared()===index?"继续冒险":"进入关卡",
     action:()=>startStage(index)
   });
 }
 function startStage(index,respawn=null,bridgeOpen=false) {
+  if (!canEnterLevel(index)) return;
   selected=index;
   mode="play";
   scene=buildScene(index);
@@ -233,7 +252,8 @@ function startStage(index,respawn=null,bridgeOpen=false) {
   player=newPlayer(respawn?.[0]??70,respawn?.[1]??scene.ground[0].y,scene.boss?5:3);
   if (respawn) player.inv=52;
   age=0;
-  camera=clamp(player.x-240,0,scene.width-W);
+  camera=scene.ridge?horizontalCameraTarget():clamp(player.x-240,0,scene.width-W);
+  cameraY=verticalCameraTarget();
   shots=[]; orbs=[]; particles=[];
   clearInput();
   renderMap();
@@ -260,14 +280,15 @@ function togglePause() {
   }
 }
 function finishLevel(advance=false) {
-  const last=selected===7;
+  const last=selected===stages.length-1;
   mode=last?"victory":"clear";
   ui.toast.hidden=true;
   clearInput();
   if (!record.cleared.includes(selected)) record.cleared.push(selected);
-  record.unlocked=Math.max(record.unlocked,Math.min(7,selected+1));
   storage.set("progress",JSON.stringify(record));
-  if (advance) { startStage(selected+1); return; }
+  const remaining=nextUncleared();
+  const next=last?0:remaining<0?selected+1:remaining;
+  if (advance && !last) { startStage(next); return; }
   renderMap();
   syncState(last?"冒险完成":"关卡完成");
   sound("clear");
@@ -276,8 +297,8 @@ function finishLevel(advance=false) {
     title:last?"你真棒":"关卡通过",
     text:last?"七片星野与最终守卫，全数通过！":"本关收集了 "+collected+" 枚星砂。",
     button:last?"再玩一次":"下一关",
-    action:()=>startStage(last?0:selected+1),
-    alt:"返回标题",altAction:()=>setupTitle(0)
+    action:()=>startStage(next),
+    alt:"返回标题",altAction:()=>setupTitle()
   });
   ui.primary.focus({preventScroll:true});
 }
@@ -329,7 +350,7 @@ function fire() {
   if (player.cooldown>0) return;
   const x=player.x+10, y=player.y+14;
   const target=pointer
-    ? {x:pointer.x+camera,y:pointer.y}
+    ? {x:pointer.x+camera,y:pointer.y+cameraY}
     : scene.boss && keys.has("Attack")
       ? {x:scene.boss.x,y:scene.boss.y-30}
       : {x:x+player.dir*100,y};
@@ -410,9 +431,9 @@ function updatePlayer() {
   const left=keys.has("KeyA") || keys.has("ArrowLeft");
   const right=keys.has("KeyD") || keys.has("ArrowRight");
   const input=Number(right)-Number(left);
-  const icy=selected===5 && p.on?.ground;
+  const icy=scene.ridge && p.on && p.on!==scene.ridge.arena;
   if (input) p.dir=input;
-  p.vx=input ? clamp(p.vx+input*(icy?.44:.85),-4.65,4.65) : p.vx*(icy?.963:.78);
+  p.vx=input ? clamp(p.vx+input*(icy?.44:.85),-4.65,4.65) : p.vx*(icy?.92:.78);
   if (p.on) {
     p.x+=p.on.x-p.on.oldX;
     p.y+=p.on.y-p.on.oldY;
@@ -429,7 +450,10 @@ function updatePlayer() {
     burst(p.x+10,p.y+32,"#e4bad3",5);
   } else if (jumpQueue>0) jumpQueue--;
 
-  p.x=clamp(p.x+p.vx,0,scene.width-p.w);
+  const ridge=scene.ridge;
+  const arena=ridge && ridge.elite.stage!=="waiting"?ridge.arena:null;
+  const minX=arena?arena.x+11:0, maxX=arena?arena.x+arena.w-p.w-11:scene.width-p.w;
+  p.x=clamp(p.x+p.vx,minX,maxX);
   const lock=scene.floodgate;
   if (lock && !lock.key && p.x+p.w>lock.x-24) {
     p.x=lock.x-24-p.w;
@@ -465,7 +489,7 @@ function updatePlayer() {
       }
     }
   }
-  if (p.y>H+60) {
+  if (p.y>scene.height+60) {
     p.hp=0;
     fail();
     return;
@@ -605,11 +629,22 @@ function updateShots() {
         if (b.hp<=0) { finishLevel(); return; }
       } else burst(s.x,s.y,"#bbabff",3);
     }
+    if (s.life>0 && scene.ridge && hitRidgeTarget(box)) s.life=0;
     if (scene.ground.some(g=>overlap(box,g))) s.life=0;
   }
-  shots=shots.filter(s=>s.life>0 && s.x>-32 && s.x<scene.width+32 && s.y>-32 && s.y<H+32);
+  shots=shots.filter(s=>s.life>0 && s.x>-32 && s.x<scene.width+32 && s.y>-32 && s.y<scene.height+32);
 }
 
+function horizontalCameraTarget() {
+  const a=scene.ridge?.arena;
+  const atSummit=a && (scene.ridge.elite.stage!=="waiting" || player.y+player.h<=a.y+6);
+  return clamp(atSummit?a.x+(a.w-W)/2:player.x-237,0,scene.width-W);
+}
+function verticalCameraTarget() {
+  const ridge=scene.ridge;
+  if (!ridge || ridge.elite.stage!=="waiting") return 0;
+  return clamp(player.y-239,0,scene.height-H);
+}
 function step() {
   tick++;
   if (toastUntil<=tick) ui.toast.hidden=true;
@@ -630,10 +665,12 @@ function step() {
   if (scene.boss) updateBoss();
   else updateLevel();
   if (mode!=="play") return;
+  if (scene.ridge) updateRidge();
+  if (mode!=="play") return;
   updateShots();
   updateInteractionPrompt();
-  const target=clamp(player.x-237,0,scene.width-W);
-  camera+=clamp((target-camera)*.12,-12,12);
+  camera+=clamp((horizontalCameraTarget()-camera)*.12,-12,12);
+  cameraY+=clamp((verticalCameraTarget()-cameraY)*.14,-15,15);
   for (const pt of particles) {
     pt.x+=pt.vx; pt.y+=pt.vy; pt.vy+=.11; pt.life--;
   }
@@ -641,39 +678,42 @@ function step() {
 }
 
 function draw() {
-  const cam=Math.floor(camera);
+  const cam=Math.floor(camera), camY=Math.floor(cameraY);
   const p=scene.stage.palette;
   const t=mode==="play"||mode==="title"?tick:age;
   if (scene.dive) { drawDive(ctx,scene.dive,t); return; }
-  scenery(ctx,selected,cam,t);
-  if (scene.floodgate) drawFloodgate(ctx,scene.floodgate,cam,t);
-  for (const g of scene.ground) {
-    tile(ctx,g,p,cam);
-    const start=Math.max(0,Math.floor((cam-g.x)/69));
-    for (let i=start;selected!==2 && g.x+i*69+27<Math.min(g.x+g.w-5,cam+W+20);i++) {
-      const x=g.x+i*69+27;
-      if (!scene.hazards.some(h=>x>=h.x-6 && x<=h.x+h.w+7)) tuft(ctx,x-cam,g.y,p,i);
+  if (scene.ridge) drawRidgeTerrain(ctx,scene.ridge,cam,camY,t);
+  else {
+    scenery(ctx,selected,cam,t);
+    if (scene.floodgate) drawFloodgate(ctx,scene.floodgate,cam,t);
+    for (const g of scene.ground) {
+      tile(ctx,g,p,cam);
+      const start=Math.max(0,Math.floor((cam-g.x)/69));
+      for (let i=start;selected!==2 && g.x+i*69+27<Math.min(g.x+g.w-5,cam+W+20);i++) {
+        const x=g.x+i*69+27;
+        if (!scene.hazards.some(h=>x>=h.x-6 && x<=h.x+h.w+7)) tuft(ctx,x-cam,g.y,p,i);
+      }
+    }
+    for (const s of scene.ledges) {
+      tile(ctx,s,p,cam);
+      if (s.axis) {
+        rect(ctx,s.x-cam+5,s.y+19,s.w-10,3,p[6]);
+        rect(ctx,s.x-cam+s.w/2-8,s.y+21,16,3,"#ffdf9b");
+      }
     }
   }
-  for (const s of scene.ledges) {
-    tile(ctx,s,p,cam);
-    if (s.axis) {
-      rect(ctx,s.x-cam+5,s.y+19,s.w-10,3,p[6]);
-      rect(ctx,s.x-cam+s.w/2-8,s.y+21,16,3,"#ffdf9b");
-    }
-  }
-  for (const h of scene.hazards) drawSpikes(ctx,h.x-cam,h.y,h.w,h.h);
+  for (const h of scene.hazards) drawSpikes(ctx,h.x-cam,h.y-camY,h.w,h.h);
   if (scene.traps.length) drawMineTraps(ctx,scene.traps,cam,t);
   if (scene.bridge) drawBridge(ctx,scene.bridge,cam);
   scene.gems.forEach((g,i)=>{
     if (stageCollected.has(i)) return;
     const {x,y}=gemPosition(g);
-    if (x>cam-12 && x<cam+W+12) gem(ctx,x-cam,y,t);
+    if (x>cam-12 && x<cam+W+12 && y>camY-12 && y<camY+H+12) gem(ctx,x-cam,y-camY,t);
   });
   if (scene.gate) {
     const x=scene.gate.x-cam,y=scene.gate.y;
     if (x>-40 && x<W+40) {
-      const blue=selected===5?"#c1f5fc":"#efb7ed";
+      const blue="#efb7ed";
       rect(ctx,x-24,y-48,48,48,p[10]);
       rect(ctx,x-19,y-56,38,56,p[10]);
       rect(ctx,x-14,y-49,28,49,p[7]);
@@ -685,10 +725,11 @@ function draw() {
       rect(ctx,x-18,y-54,36,4,blue);
     }
   }
-  for (const save of [scene.stage.checkpoint,scene.bridge?.after]) {
+  const saves=scene.ridge?.checkpoints??[scene.stage.checkpoint,scene.bridge?.after];
+  for (const save of saves) {
     if (!save) continue;
-    const [x,y]=save;
-    const active=checkpoint && checkpoint[0]>=x;
+    const x=save[0], y=save[1]-camY;
+    const active=checkpoint && (scene.ridge?checkpoint[1]<=save[1]:checkpoint[0]>=x);
     rect(ctx,x-cam-2,y-47,4,47,"#e1c7f4");
     polygon(ctx,[[x-cam,y-45],[x-cam+24,y-41],[x-cam+20,y-28],[x-cam,y-29]],active?"#def982":"#b697d5");
     if (active) sparkle(ctx,x-cam+4,y-55+Math.sin(t*.1)*3,5,"#f9ffc2");
@@ -700,16 +741,17 @@ function draw() {
     rect(ctx,208-cam,367,3,3,"#79567d");
     rect(ctx,208-cam,373,3,3,"#79567d");
   }
-  for (const e of scene.enemies) if (e.alive && e.x>cam-30 && e.x<cam+W+30) enemySprite(ctx,e,cam,t);
+  for (const e of scene.enemies) if (e.alive && e.x>cam-30 && e.x<cam+W+30) enemySprite(ctx,e,cam,t,camY);
   if (scene.boss) drawBoss(t);
+  if (scene.ridge) drawRidgeActors(ctx,scene.ridge,cam,camY,t);
   for (const s of shots) {
-    rect(ctx,s.x-cam-s.vx*.8,s.y-s.vy*.8,6,4,"#99b7df");
-    sparkle(ctx,s.x-cam,s.y,6,"#dbfff6");
+    rect(ctx,s.x-cam-s.vx*.8,s.y-camY-s.vy*.8,6,4,"#99b7df");
+    sparkle(ctx,s.x-cam,s.y-camY,6,"#dbfff6");
   }
-  playerSprite(ctx,player.x+10-cam,player.y+32,player.dir,t,Math.abs(player.vx)>.6,!player.on&&mode==="play",player.inv>0);
+  playerSprite(ctx,player.x+10-cam,player.y+32-camY,player.dir,t,Math.abs(player.vx)>.6,!player.on&&mode==="play",player.inv>0);
   for (const pt of particles) {
     ctx.globalAlpha=Math.min(1,pt.life/10);
-    rect(ctx,pt.x-cam,pt.y,3,3,pt.color);
+    rect(ctx,pt.x-cam,pt.y-camY,3,3,pt.color);
   }
   ctx.globalAlpha=1;
 }

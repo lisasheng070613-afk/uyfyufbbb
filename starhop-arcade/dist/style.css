@@ -190,3 +190,14 @@ ol { display:grid; gap:6px; list-style:none; margin:0; padding:0 }
   .touch button { min-width:32px; padding:0 4px }
 }
 .rhythm-actions { display:flex; gap:5px }
+
+.map-access { margin:-3px 4px 10px; font-size:10px; color:var(--muted); line-height:1.4 }
+.level.done:disabled .level-status { color:#a393b5 }
+.ridge-hud {
+  position:absolute; z-index:2; top:13px; right:13px; display:flex; align-items:center;
+  gap:9px; padding:6px 9px; border:1px solid #809ecd; background:#1c2542ee;
+  border-radius:6px; color:#dcefff; font-size:11px; pointer-events:none
+}
+.ridge-hud span { font:800 11px ui-monospace,monospace; color:#e1f7a9; white-space:nowrap }
+.ridge-hud.elite { background:#3e2738f2; border-color:#c27c68; color:#ffdac7 }
+@media (max-width:470px) { .ridge-hud { top:6px; right:6px; padding:4px 6px; gap:5px; font-size:9px } .ridge-hud span { font-size:9px } }
