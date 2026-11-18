@@ -78,6 +78,10 @@ canvas { width:100%; height:100%; display:block; image-rendering:pixelated; outl
 .boss-hud { position:absolute; z-index:1; top:13px; right:13px; width:35%; min-width:125px; padding:7px 9px; background:#211638ec; border:1px solid #ac76ae; border-radius:6px; font-size:11px; pointer-events:none }
 .boss-hud div:first-child { display:flex; justify-content:space-between; gap:6px; align-items:center; margin-bottom:5px }
 #bossPhase { font-size:10px; color:#ffe1a5 }
+#bossTimer { margin-left:3px; color:#cbb8e0; font:800 10px ui-monospace,monospace }
+.boss-hud.counter { border-color:#d3af78 }
+.boss-hud.counter #bossPhase { color:#dfff9f }
+@media (max-width:470px) { #bossTimer { font-size:9px; margin-left:1px } }
 .boss-track,.progress-track { height:5px; border-radius:5px; background:#413353; overflow:hidden }
 .boss-track i,.progress-track i { display:block; height:100%; width:0%; border-radius:5px; background:var(--lime); transition:width .2s }
 .boss-track i { background:#ff8fc0 }

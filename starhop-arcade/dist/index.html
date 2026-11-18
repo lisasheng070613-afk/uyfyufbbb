@@ -12,6 +12,7 @@
   <script src="./ridge.js" defer></script>
   <script src="./forest.js" defer></script>
   <script src="./scenery.js" defer></script>
+  <script src="./boss.js" defer></script>
   <script src="./game.js" defer></script>
 </head>
 <body>
@@ -50,7 +51,7 @@
             <div class="hearts" id="hearts"></div>
             <div class="hud-chip"><svg><use href="#i-star"/></svg><span id="stars">00</span></div>
           </div>
-          <div class="boss-hud" id="bossHud" hidden><div><strong>星铃守卫</strong><span id="bossPhase"></span></div><div class="boss-track"><i id="bossFill"></i></div></div>
+          <div class="boss-hud" id="bossHud" hidden><div><strong>星铃守卫 <small id="bossTimer">0:00</small></strong><span id="bossPhase"></span></div><div class="boss-track"><i id="bossFill"></i></div></div>
           <div id="ridgeHud" class="ridge-hud" hidden>
             <strong id="ridgeLabel">攀登</strong><span id="ridgeValue"></span>
           </div>

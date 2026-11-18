@@ -4,7 +4,7 @@ const byId = id => document.getElementById(id);
 const canvas=byId("game");
 const ctx=canvas.getContext("2d");
 const ui=Object.fromEntries([
-  "cabinet","screen","zone","worldName","status","pause","hud","stars","hearts","bossHud","bossPhase","bossFill","toast",
+  "cabinet","screen","zone","worldName","status","pause","hud","stars","hearts","bossHud","bossPhase","bossFill","bossTimer","toast",
   "overlay","eyebrow","overlayTitle","overlayText","primary","primaryText","secondary","touch","stageTag",
   "progressText","progressFill","levelList","sound","fullscreen","mapAccess","stageGoal","ridgeHud","ridgeLabel","ridgeValue"
 ].map(id=>[id,byId(id)]));
@@ -93,7 +93,7 @@ bossImage.src="./boss.webp";
 const keys=new Set();
 let pointer=null, firing=false;
 let selected=0, mode="title", scene, player, tick=0, age=0, camera=0, cameraY=0;
-let particles=[], shots=[], orbs=[], collected=0, checkpoint=null, stageCollected=new Set();
+let particles=[], shots=[], collected=0, checkpoint=null, stageCollected=new Set();
 let jumpQueue=0, toastUntil=0, primaryAction, secondaryAction, resumeAfterPause="play";
 
 const colors=[
@@ -160,7 +160,7 @@ function buildScene(index) {
     [18,43,68].filter(x=>x<ledge.w-8).forEach(dx=>gems.push({ledge,dx}));
   }
   const end=ground.at(-1);
-  const boss=index===7?{x:626,y:295,hp:27,max:27,phase:1,cycle:0,frame:0,flash:0,rageAt:null,rageCycle:0}:null;
+  const boss=index===7?buildBoss():null;
   const bridge=stage.bridge?{...stage.bridge,open:false,lowering:null,rhythm:null}:null;
   const floodgate=stage.floodgate?{...stage.floodgate,key:false,countdown:null}:null;
   const traps=createTraps(stage);
@@ -226,7 +226,7 @@ function setupTitle(index=Math.max(0,nextUncleared())) {
   age=camera=collected=0;
   cameraY=verticalCameraTarget();
   checkpoint=null;
-  particles=[]; shots=[]; orbs=[];
+  particles=[]; shots=[];
   stageCollected=new Set();
   ui.toast.hidden=true;
   clearInput();
@@ -256,7 +256,7 @@ function startStage(index,respawn=null,bridgeOpen=false) {
   age=0;
   camera=scene.ridge?horizontalCameraTarget():clamp(player.x-240,0,scene.width-W);
   cameraY=verticalCameraTarget();
-  shots=[]; orbs=[]; particles=[];
+  shots=[]; particles=[];
   clearInput();
   renderMap();
   syncState("进行中");
@@ -322,12 +322,7 @@ function refreshHud() {
   ui.hearts.innerHTML=Array.from({length:player.max},(_,i)=>'<svg'+(i>=player.hp?' class="lost"':'')+' aria-hidden="true"><use href="#i-heart"/></svg>').join("");
   ui.hearts.setAttribute("aria-label","生命 "+player.hp+" / "+player.max);
   ui.stars.textContent=String(collected).padStart(2,"0");
-  const b=scene.boss;
-  ui.bossHud.classList.toggle("rage",b?.phase===3);
-  if (b) {
-    ui.bossFill.style.width=b.hp/b.max*100+"%";
-    ui.bossPhase.textContent=["Ⅰ","Ⅱ","Ⅲ 红温"][b.phase-1]+" · "+(b.frame>=213?"可攻击":"护盾开启");
-  }
+  updateBossHud(scene.boss);
 }
 function burst(x,y,color,count=9) {
   for (let i=0;i<count;i++) {
@@ -354,7 +349,7 @@ function fire() {
   const target=pointer
     ? {x:pointer.x+camera,y:pointer.y+cameraY}
     : scene.boss && keys.has("Attack")
-      ? {x:scene.boss.x,y:scene.boss.y-30}
+      ? {x:scene.boss.x,y:scene.boss.y}
       : {x:x+player.dir*100,y};
   const dx=target.x-x, dy=target.y-y;
   const mag=Math.hypot(dx,dy)||1;
@@ -556,68 +551,6 @@ function updateLevel() {
   if (scene.gate && Math.abs(p.x+10-scene.gate.x)<24 && p.y+p.h>scene.gate.y-67) finishLevel();
 }
 
-function spawnOrb(x,y,vx,vy,r,color,kind="",life=280) {
-  const damage=scene.boss.phase===3?2:1;
-  orbs.push({x,y,vx,vy,r,color:damage===2?"#ff5272":color,kind,life,damage});
-}
-function ball(x,y,angle,speed,r,color,kind="") {
-  spawnOrb(x,y,Math.cos(angle)*speed,Math.sin(angle)*speed,r,color,kind);
-}
-function beginBossRage(b) {
-  b.phase=3;
-  b.frame=0;
-  b.rageAt=age+1;
-  b.rageCycle=b.cycle+1;
-  orbs=[];
-  burst(b.x,b.y-38,"#ff4368",32);
-  sound("hurt");
-  showToast("第三阶段 · 红温！弹幕伤害翻倍",150);
-}
-function updateBoss() {
-  const b=scene.boss, p=player;
-  b.x=626+Math.sin(age*.022)*18;
-  b.y=292+Math.sin(age*.045)*12;
-  const elapsed=b.rageAt===null?age-1:Math.max(0,age-b.rageAt);
-  b.frame=elapsed%367;
-  b.cycle=b.rageCycle+Math.floor(elapsed/367);
-  if (b.flash>0) b.flash--;
-  const f=b.frame, pattern=(b.cycle+b.phase-1)%3;
-  const enteringRage=b.rageAt!==null && b.cycle===b.rageCycle;
-  if (f===(enteringRage?26:1)) {
-    const telegraph=["扇形弹幕 · 留意弹道间隙","星雨 · 避开地面标记","贴地星浪 · 跳起来"][pattern];
-    showToast(enteringRage?"红温 · "+telegraph:telegraph,77);
-  }
-  if (f===213) { showToast("护盾消失 · 反击！",120); sound("save"); }
-  if (f===1 || f===213 || f===0) refreshHud();
-
-  if (pattern===0 && f>=52 && f<=174 && (f-52)%(b.phase===1?38:30)===0) {
-    const theta=Math.atan2(p.y+12-(b.y-30),p.x+10-(b.x-35));
-    for (let i=-2;i<=2;i++) ball(b.x-36,b.y-30,theta+i*.24,3.1+b.phase*.45,7,"#ff99c9");
-  }
-  if (pattern===1 && f>=48 && f<=180 && (f-48)%22===0) {
-    const lane=(Math.floor((f-48)/22)*3+b.cycle)%8;
-    [46+lane*87,46+(lane+4)%8*87].forEach(x=>{
-      spawnOrb(x,-12,0,5.4+b.phase*.43,7,"#ffb68d","rain",135);
-    });
-  }
-  if (pattern===2 && f>=57 && f<=178 && (f-57)%25===0) {
-    ball(b.x-34,392,Math.PI,5.15+b.phase*.3,10,"#ff8bcb","wave");
-    if (b.phase>1) ball(b.x-34,354,Math.PI,3.35,7,"#c6afff");
-  }
-  const body={x:b.x-46,y:b.y-80,w:92,h:98};
-  if (overlap(p,body)) hit(Math.sign(p.x-b.x)||-1);
-
-  for (const o of orbs) {
-    o.x+=o.vx; o.y+=o.vy; o.life--;
-    const nx=clamp(o.x,p.x,p.x+p.w), ny=clamp(o.y,p.y,p.y+p.h);
-    if (Math.hypot(nx-o.x,ny-o.y)<o.r) {
-      o.life=0;
-      hit(Math.sign(p.x+10-o.x)||-1,o.damage);
-    }
-  }
-  orbs=orbs.filter(o=>o.life>0 && o.x>-40 && o.x<W+40 && o.y<H+22);
-}
-
 function updateShots() {
   const b=scene.boss;
   for (const s of shots) {
@@ -631,18 +564,9 @@ function updateShots() {
       sound("hit");
       break;
     }
-    if (b && s.life>0 && overlap(box,{x:b.x-65,y:b.y-101,w:130,h:139})) {
+    if (b && s.life>0 && hitBoss(s,box)) {
       s.life=0;
-      if (b.frame>=213) {
-        b.hp--;
-        b.flash=5;
-        if (b.hp===18) b.phase=2;
-        if (b.hp===9 && b.rageAt===null) beginBossRage(b);
-        burst(s.x,s.y,"#ffc0db",5);
-        refreshHud();
-        sound("hit");
-        if (b.hp<=0) { finishLevel(); return; }
-      } else burst(s.x,s.y,"#bbabff",3);
+      if (mode!=="play") return;
     }
     if (s.life>0 && scene.ridge && hitRidgeTarget(box)) s.life=0;
     if (scene.ground.some(g=>overlap(box,g))) s.life=0;
@@ -783,53 +707,6 @@ function draw() {
   }
   ctx.globalAlpha=1;
 }
-function drawBoss(t) {
-  const b=scene.boss;
-  if (b.hp<=0) return;
-  const y=b.y-101+(mode==="title"?Math.sin(t*.035)*7:0);
-  const x=b.x;
-  ctx.globalAlpha=.3;
-  rect(ctx,x-65,389,130,7,"#211638");
-  rect(ctx,x-45,384,90,6,"#211638");
-  ctx.globalAlpha=1;
-  for (let i=0;i<6;i++) {
-    const a=i*Math.PI/3+t*.016;
-    sparkle(ctx,x+Math.cos(a)*93,b.y-33+Math.sin(a)*83,i%2===0?7:4,b.phase===3?"#ff5e80":i%2===0?"#ffb8e9":"#d4bbff");
-  }
-  if (bossImage.complete && bossImage.naturalWidth>0) {
-    ctx.imageSmoothingEnabled=true;
-    ctx.globalAlpha=b.flash?.62:1;
-    if (b.phase===3) { ctx.shadowColor="#ff325a"; ctx.shadowBlur=16; }
-    ctx.drawImage(b.phase===3 && enragedBossImage?enragedBossImage:bossImage,x-71,y,142,145);
-    ctx.shadowBlur=0;
-    ctx.globalAlpha=1;
-    ctx.imageSmoothingEnabled=false;
-  }
-  if (b.frame<213 && mode!=="title") {
-    ctx.beginPath();
-    ctx.ellipse(x,b.y-32,82,87,0,0,Math.PI*2);
-    ctx.strokeStyle=b.phase===3?"#ff8096d0":"#e1b4f0a0";
-    ctx.lineWidth=2;
-    ctx.stroke();
-  }
-  const pattern=(b.cycle+b.phase-1)%3;
-  const nextRain=Math.floor((b.frame-48)/22)+1;
-  if (mode==="play" && pattern===1 && b.frame>=28 && nextRain>=0 && nextRain<=6) {
-    const lane=(nextRain*3+b.cycle)%8;
-    for (const x of [46+lane*87,46+(lane+4)%8*87]) {
-      ctx.globalAlpha=.26+Math.sin(t*.4)*.11;
-      rect(ctx,x-11,0,22,403,"#ff9cbb");
-      ctx.globalAlpha=1;
-      rect(ctx,x-12,399,24,4,"#ff9cbb");
-    }
-  }
-  for (const o of orbs) {
-    rect(ctx,o.x-o.r*.66,o.y-o.r,o.r*1.32,o.r*2,o.color);
-    rect(ctx,o.x-o.r,o.y-o.r*.66,o.r*2,o.r*1.32,o.color);
-    sparkle(ctx,o.x,o.y,Math.max(3,o.r-3),"#fff3d5");
-  }
-}
-
 refreshSound();
 initChallengeControls();
 initForestControls();
