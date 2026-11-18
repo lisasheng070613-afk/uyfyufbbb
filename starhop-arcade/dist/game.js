@@ -34,9 +34,9 @@ function sound(name) {
   try {
     audioContext ??= new AudioContext();
     if (audioContext.state==="suspended") audioContext.resume().catch(()=>{});
-    const notes={ jump:[345,560], land:[168,105], collect:[660,910], shot:[390,266], hurt:[198,94], hit:[274,460], save:[440,660,825], clear:[392,523,659,784] };
+    const notes={ jump:[345,560], land:[168,105], collect:[660,910], shot:[390,266], beat:[510], hurt:[198,94], hit:[274,460], save:[440,660,825], clear:[392,523,659,784] };
     const melody=notes[name];
-    const quick=name==="shot";
+    const quick=name==="shot" || name==="beat";
     const length=quick?.036:.082;
     for (const [i,note] of melody.entries()) {
       const osc=audioContext.createOscillator(), volume=audioContext.createGain();
@@ -74,6 +74,17 @@ ui.fullscreen.onclick=async ()=>{
 ui.pause.onclick=togglePause;
 
 const bossImage=new Image();
+let enragedBossImage;
+bossImage.addEventListener("load",()=>{
+  enragedBossImage=document.createElement("canvas");
+  enragedBossImage.width=bossImage.naturalWidth;
+  enragedBossImage.height=bossImage.naturalHeight;
+  const texture=enragedBossImage.getContext("2d");
+  texture.drawImage(bossImage,0,0);
+  texture.globalCompositeOperation="source-atop";
+  texture.fillStyle="#f2254ab3";
+  texture.fillRect(0,0,enragedBossImage.width,enragedBossImage.height);
+});
 bossImage.src="./boss.webp";
 const keys=new Set();
 let pointer=null, firing=false;
@@ -108,7 +119,7 @@ function renderMap() {
     button.innerHTML='<span class="level-icon">'+pixelIcon(stage)+'</span><span class="level-text"><strong>'+stage.name+'</strong><small>'+String(index+1).padStart(2,"0")+" · "+stage.en+'</small></span><span class="level-status">'+icon(complete?"check":active||available?"play":"lock")+'</span>';
     button.onclick=()=>{
       if (mode==="title" && selected===index) startStage(index);
-      else if (selected!==index || mode!=="play") setupTitle(index);
+      else if (selected!==index || !["play","rhythm"].includes(mode)) setupTitle(index);
       else canvas.focus();
     };
     li.append(button);
@@ -137,8 +148,15 @@ function buildScene(index) {
     [18,43,68].filter(x=>x<ledge.w-8).forEach(dx=>gems.push({ledge,dx}));
   }
   const end=ground.at(-1);
-  const boss=index===7?{x:626,y:295,w:133,h:138,hp:27,max:27,phase:1,cycle:0,frame:0,flash:0}:null;
-  return {stage,ground,ledges,solids:[...ground,...ledges],hazards,enemies,gems,width:end.x+end.w,gate:boss?null:{x:end.x+end.w-115,y:end.y},boss};
+  const boss=index===7?{x:626,y:295,hp:27,max:27,phase:1,cycle:0,frame:0,flash:0,rageAt:null,rageCycle:0}:null;
+  const bridge=stage.bridge?{...stage.bridge,open:false,lowering:null,rhythm:null}:null;
+  const floodgate=stage.floodgate?{...stage.floodgate,key:false,countdown:null}:null;
+  const traps=createTraps(stage);
+  moveTraps(traps,0);
+  return {
+    stage,ground,ledges,solids:[...ground,...ledges],hazards,traps,enemies,gems,width:end.x+end.w,
+    gate:boss||floodgate?null:{x:end.x+end.w-115,y:end.y},boss,bridge,floodgate,dive:null
+  };
 }
 
 function newPlayer(x,y,max) {
@@ -180,6 +198,7 @@ function syncState(label) {
   ui.hud.hidden=mode==="title";
   ui.bossHud.hidden=mode==="title" || !scene.boss;
   ui.stageTag.innerHTML=selected===7?"终幕 <i></i> 弹幕对决":"横版冒险 <i></i> 08 关卡";
+  updateChallengeHud();
 }
 function setupTitle(index=0) {
   selected=index;
@@ -201,7 +220,7 @@ function setupTitle(index=0) {
     action:()=>startStage(index)
   });
 }
-function startStage(index,respawn=null) {
+function startStage(index,respawn=null,bridgeOpen=false) {
   selected=index;
   mode="play";
   scene=buildScene(index);
@@ -210,6 +229,7 @@ function startStage(index,respawn=null) {
     collected=0;
   }
   checkpoint=respawn;
+  if (bridgeOpen) openBridge(scene);
   player=newPlayer(respawn?.[0]??70,respawn?.[1]??scene.ground[0].y,scene.boss?5:3);
   if (respawn) player.inv=52;
   age=0;
@@ -239,7 +259,7 @@ function togglePause() {
     canvas.focus({preventScroll:true});
   }
 }
-function finishLevel() {
+function finishLevel(advance=false) {
   const last=selected===7;
   mode=last?"victory":"clear";
   ui.toast.hidden=true;
@@ -247,6 +267,7 @@ function finishLevel() {
   if (!record.cleared.includes(selected)) record.cleared.push(selected);
   record.unlocked=Math.max(record.unlocked,Math.min(7,selected+1));
   storage.set("progress",JSON.stringify(record));
+  if (advance) { startStage(selected+1); return; }
   renderMap();
   syncState(last?"冒险完成":"关卡完成");
   sound("clear");
@@ -260,7 +281,7 @@ function finishLevel() {
   });
   ui.primary.focus({preventScroll:true});
 }
-function fail() {
+function fail(reason) {
   mode="fail";
   ui.toast.hidden=true;
   clearInput();
@@ -268,8 +289,8 @@ function fail() {
   syncState("挑战中断");
   configureOverlay({
     tag:"TRY AGAIN",title:"再试一次",
-    text:checkpoint?"检查点已点亮，可以从那里继续。":"准备好，再出发！",
-    button:checkpoint?"从检查点重试":"重试本关",action:()=>startStage(selected,checkpoint),
+    text:reason??(checkpoint?"检查点已点亮，可以从那里继续。":"准备好，再出发！"),
+    button:checkpoint?"从检查点重试":"重试本关",action:()=>startStage(selected,checkpoint,scene.bridge?.open),
     alt:"返回标题",altAction:()=>setupTitle(selected)
   });
   ui.primary.focus({preventScroll:true});
@@ -279,9 +300,10 @@ function refreshHud() {
   ui.hearts.setAttribute("aria-label","生命 "+player.hp+" / "+player.max);
   ui.stars.textContent=String(collected).padStart(2,"0");
   const b=scene.boss;
+  ui.bossHud.classList.toggle("rage",b?.phase===3);
   if (b) {
     ui.bossFill.style.width=b.hp/b.max*100+"%";
-    ui.bossPhase.textContent=b.frame>=213?"可攻击":"护盾开启";
+    ui.bossPhase.textContent=["Ⅰ","Ⅱ","Ⅲ 红温"][b.phase-1]+" · "+(b.frame>=213?"可攻击":"护盾开启");
   }
 }
 function burst(x,y,color,count=9) {
@@ -291,9 +313,9 @@ function burst(x,y,color,count=9) {
     particles.push({x,y,vx:Math.cos(a)*speed,vy:Math.sin(a)*speed-.5,life:16+Math.random()*16,color});
   }
 }
-function hit(away) {
+function hit(away,damage=1) {
   if (player.inv || mode!=="play") return;
-  player.hp--;
+  player.hp=Math.max(0,player.hp-damage);
   player.inv=83;
   player.vx=away*5.4;
   player.vy=-6.8;
@@ -324,7 +346,7 @@ function aimEvent(event) {
 }
 canvas.addEventListener("pointermove",event=>{ if (event.pointerType!=="touch") aimEvent(event); });
 canvas.addEventListener("pointerdown",event=>{
-  if (event.button!==0 || event.pointerType==="touch" || mode!=="play") return;
+  if (event.button!==0 || event.pointerType==="touch" || mode!=="play" || scene.dive || scene.floodgate?.key) return;
   event.preventDefault();
   aimEvent(event);
   firing=true;
@@ -332,15 +354,35 @@ canvas.addEventListener("pointerdown",event=>{
 });
 window.addEventListener("pointerup",()=>{firing=false;});
 window.addEventListener("pointercancel",()=>{firing=false;});
-window.addEventListener("blur",()=>{ if(mode==="play") togglePause(); else clearInput(); });
+window.addEventListener("blur",()=>{
+  if (mode==="rhythm") endRhythm(false);
+  else if (mode==="play") togglePause();
+  else clearInput();
+});
 const movementKeys=new Set(["KeyA","KeyD","ArrowLeft","ArrowRight","Space","KeyJ"]);
 window.addEventListener("keydown",event=>{
+  if (mode==="rhythm") {
+    if (event.code==="Escape" || event.code==="KeyE") {
+      event.preventDefault();
+      if (!event.repeat) endRhythm(false);
+    } else if (event.code.startsWith("Arrow")) {
+      event.preventDefault();
+      if (!event.repeat) judgeRhythm(event.code);
+    }
+    return;
+  }
   if (event.code==="Escape" && (mode==="play" || mode==="pause")) {
     event.preventDefault();
     if (!event.repeat) togglePause();
     return;
   }
-  if (mode!=="play" || !movementKeys.has(event.code)) return;
+  if (mode!=="play") return;
+  if (event.code==="KeyE") {
+    event.preventDefault();
+    if (!event.repeat) useInteraction();
+    return;
+  }
+  if (!movementKeys.has(event.code) && !(scene.dive && swimKeys.has(event.code))) return;
   if (document.activeElement?.tagName==="BUTTON" && event.code==="Space") return;
   event.preventDefault();
   keys.add(event.code);
@@ -352,6 +394,7 @@ for (const button of ui.touch.querySelectorAll("button")) {
   button.addEventListener("pointerdown",event=>{
     if (mode!=="play") return;
     event.preventDefault();
+    if (key==="KeyE") { useInteraction(); return; }
     button.setPointerCapture(event.pointerId);
     keys.add(key);
     if (key==="Space") jumpQueue=9;
@@ -387,6 +430,11 @@ function updatePlayer() {
   } else if (jumpQueue>0) jumpQueue--;
 
   p.x=clamp(p.x+p.vx,0,scene.width-p.w);
+  const lock=scene.floodgate;
+  if (lock && !lock.key && p.x+p.w>lock.x-24) {
+    p.x=lock.x-24-p.w;
+    p.vx=0;
+  }
   for (const s of scene.solids) {
     if (!s.ground || !overlap(p,s)) continue;
     if (p.vx>0) p.x=s.x-p.w;
@@ -430,7 +478,9 @@ function gemPosition(g) {
 }
 function updateLevel() {
   const p=player;
-  for (const h of scene.hazards) if (overlap(p,h)) hit(Math.sign(p.x+10-h.x-h.w/2)||-1);
+  for (const h of [...scene.hazards,...scene.traps]) {
+    if (h.h>0 && overlap(p,h)) hit(Math.sign(p.x+10-h.x-h.w/2)||-1);
+  }
   for (const e of scene.enemies) {
     if (!e.alive) continue;
     e.x+=e.dir*(1+selected*.06);
@@ -444,8 +494,8 @@ function updateLevel() {
     } else hit(Math.sign(p.x-e.x)||-1);
   }
   if (mode!=="play") return;
-  const save=scene.stage.checkpoint;
-  if (!checkpoint && save && Math.abs(p.x+10-save[0])<32 && p.y+p.h>save[1]-110) {
+  const save=scene.bridge?.open && p.x>scene.bridge.x+scene.bridge.w?scene.bridge.after:scene.stage.checkpoint;
+  if (save && (!checkpoint || save[0]>checkpoint[0]) && Math.abs(p.x+10-save[0])<32 && p.y+p.h>save[1]-110) {
     checkpoint=save;
     p.hp=p.max;
     refreshHud();
@@ -467,19 +517,37 @@ function updateLevel() {
   if (scene.gate && Math.abs(p.x+10-scene.gate.x)<24 && p.y+p.h>scene.gate.y-67) finishLevel();
 }
 
-function ball(x,y,angle,speed,r,color,gravity=0,kind="") {
-  orbs.push({x,y,vx:Math.cos(angle)*speed,vy:Math.sin(angle)*speed,r,color,gravity,kind,life:280});
+function spawnOrb(x,y,vx,vy,r,color,kind="",life=280) {
+  const damage=scene.boss.phase===3?2:1;
+  orbs.push({x,y,vx,vy,r,color:damage===2?"#ff5272":color,kind,life,damage});
+}
+function ball(x,y,angle,speed,r,color,kind="") {
+  spawnOrb(x,y,Math.cos(angle)*speed,Math.sin(angle)*speed,r,color,kind);
+}
+function beginBossRage(b) {
+  b.phase=3;
+  b.frame=0;
+  b.rageAt=age+1;
+  b.rageCycle=b.cycle+1;
+  orbs=[];
+  burst(b.x,b.y-38,"#ff4368",32);
+  sound("hurt");
+  showToast("第三阶段 · 红温！弹幕伤害翻倍",150);
 }
 function updateBoss() {
   const b=scene.boss, p=player;
   b.x=626+Math.sin(age*.022)*18;
   b.y=292+Math.sin(age*.045)*12;
-  b.phase=b.hp<=9?3:b.hp<=18?2:1;
-  b.frame=(age-1)%367;
-  b.cycle=Math.floor((age-1)/367);
+  const elapsed=b.rageAt===null?age-1:Math.max(0,age-b.rageAt);
+  b.frame=elapsed%367;
+  b.cycle=b.rageCycle+Math.floor(elapsed/367);
   if (b.flash>0) b.flash--;
   const f=b.frame, pattern=(b.cycle+b.phase-1)%3;
-  if (f===1) showToast(["扇形弹幕 · 留意弹道间隙","星雨 · 避开地面标记","贴地星浪 · 跳起来"][pattern],77);
+  const enteringRage=b.rageAt!==null && b.cycle===b.rageCycle;
+  if (f===(enteringRage?26:1)) {
+    const telegraph=["扇形弹幕 · 留意弹道间隙","星雨 · 避开地面标记","贴地星浪 · 跳起来"][pattern];
+    showToast(enteringRage?"红温 · "+telegraph:telegraph,77);
+  }
   if (f===213) { showToast("护盾消失 · 反击！",120); sound("save"); }
   if (f===1 || f===213 || f===0) refreshHud();
 
@@ -490,22 +558,22 @@ function updateBoss() {
   if (pattern===1 && f>=48 && f<=180 && (f-48)%22===0) {
     const lane=(Math.floor((f-48)/22)*3+b.cycle)%8;
     [46+lane*87,46+(lane+4)%8*87].forEach(x=>{
-      orbs.push({x,y:-12,vx:0,vy:5.4+b.phase*.43,r:7,color:"#ffb68d",gravity:0,kind:"rain",life:135});
+      spawnOrb(x,-12,0,5.4+b.phase*.43,7,"#ffb68d","rain",135);
     });
   }
   if (pattern===2 && f>=57 && f<=178 && (f-57)%25===0) {
-    ball(b.x-34,392,Math.PI,5.15+b.phase*.3,10,"#ff8bcb",0,"wave");
+    ball(b.x-34,392,Math.PI,5.15+b.phase*.3,10,"#ff8bcb","wave");
     if (b.phase>1) ball(b.x-34,354,Math.PI,3.35,7,"#c6afff");
   }
   const body={x:b.x-46,y:b.y-80,w:92,h:98};
   if (overlap(p,body)) hit(Math.sign(p.x-b.x)||-1);
 
   for (const o of orbs) {
-    o.x+=o.vx; o.y+=o.vy; o.vy+=o.gravity; o.life--;
+    o.x+=o.vx; o.y+=o.vy; o.life--;
     const nx=clamp(o.x,p.x,p.x+p.w), ny=clamp(o.y,p.y,p.y+p.h);
     if (Math.hypot(nx-o.x,ny-o.y)<o.r) {
       o.life=0;
-      hit(Math.sign(p.x+10-o.x)||-1);
+      hit(Math.sign(p.x+10-o.x)||-1,o.damage);
     }
   }
   orbs=orbs.filter(o=>o.life>0 && o.x>-40 && o.x<W+40 && o.y<H+22);
@@ -529,6 +597,8 @@ function updateShots() {
       if (b.frame>=213) {
         b.hp--;
         b.flash=5;
+        if (b.hp===18) b.phase=2;
+        if (b.hp===9 && b.rageAt===null) beginBossRage(b);
         burst(s.x,s.y,"#ffc0db",5);
         refreshHud();
         sound("hit");
@@ -543,8 +613,12 @@ function updateShots() {
 function step() {
   tick++;
   if (toastUntil<=tick) ui.toast.hidden=true;
+  if (mode==="rhythm") { updateRhythm(); return; }
   if (mode!=="play") return;
+  if (scene.dive) { updateDive(); return; }
+  if (updateGateTransition()) return;
   age++;
+  moveTraps(scene.traps,age);
   for (const s of scene.ledges) {
     s.oldX=s.x; s.oldY=s.y;
     const travel=Math.sin(age*.021+s.phase)*s.range;
@@ -552,11 +626,12 @@ function step() {
     if (s.axis==="y") s.y=s.baseY+travel;
   }
   updatePlayer();
-  if (mode!=="play") return;
+  if (mode!=="play" || updateSurfaceChallenges()) return;
   if (scene.boss) updateBoss();
   else updateLevel();
   if (mode!=="play") return;
   updateShots();
+  updateInteractionPrompt();
   const target=clamp(player.x-237,0,scene.width-W);
   camera+=clamp((target-camera)*.12,-12,12);
   for (const pt of particles) {
@@ -569,11 +644,13 @@ function draw() {
   const cam=Math.floor(camera);
   const p=scene.stage.palette;
   const t=mode==="play"||mode==="title"?tick:age;
+  if (scene.dive) { drawDive(ctx,scene.dive,t); return; }
   scenery(ctx,selected,cam,t);
+  if (scene.floodgate) drawFloodgate(ctx,scene.floodgate,cam,t);
   for (const g of scene.ground) {
     tile(ctx,g,p,cam);
     const start=Math.max(0,Math.floor((cam-g.x)/69));
-    for (let i=start;g.x+i*69+27<Math.min(g.x+g.w-5,cam+W+20);i++) {
+    for (let i=start;selected!==2 && g.x+i*69+27<Math.min(g.x+g.w-5,cam+W+20);i++) {
       const x=g.x+i*69+27;
       if (!scene.hazards.some(h=>x>=h.x-6 && x<=h.x+h.w+7)) tuft(ctx,x-cam,g.y,p,i);
     }
@@ -585,13 +662,9 @@ function draw() {
       rect(ctx,s.x-cam+s.w/2-8,s.y+21,16,3,"#ffdf9b");
     }
   }
-  for (const h of scene.hazards) {
-    for (let x=h.x;x<h.x+h.w;x+=9) {
-      const s=x-cam, w=Math.min(9,h.x+h.w-x);
-      polygon(ctx,[[s,h.y+h.h],[s+w/2,h.y],[s+w,h.y+h.h]],"#fbd0d6");
-      polygon(ctx,[[s+w/2,h.y],[s+w,h.y+h.h],[s+w/2,h.y+h.h]],"#b46b98");
-    }
-  }
+  for (const h of scene.hazards) drawSpikes(ctx,h.x-cam,h.y,h.w,h.h);
+  if (scene.traps.length) drawMineTraps(ctx,scene.traps,cam,t);
+  if (scene.bridge) drawBridge(ctx,scene.bridge,cam);
   scene.gems.forEach((g,i)=>{
     if (stageCollected.has(i)) return;
     const {x,y}=gemPosition(g);
@@ -612,12 +685,13 @@ function draw() {
       rect(ctx,x-18,y-54,36,4,blue);
     }
   }
-  const save=scene.stage.checkpoint;
-  if (save) {
+  for (const save of [scene.stage.checkpoint,scene.bridge?.after]) {
+    if (!save) continue;
     const [x,y]=save;
+    const active=checkpoint && checkpoint[0]>=x;
     rect(ctx,x-cam-2,y-47,4,47,"#e1c7f4");
-    polygon(ctx,[[x-cam,y-45],[x-cam+24,y-41],[x-cam+20,y-28],[x-cam,y-29]],checkpoint?"#def982":"#b697d5");
-    if (checkpoint) sparkle(ctx,x-cam+4,y-55+Math.sin(t*.1)*3,5,"#f9ffc2");
+    polygon(ctx,[[x-cam,y-45],[x-cam+24,y-41],[x-cam+20,y-28],[x-cam,y-29]],active?"#def982":"#b697d5");
+    if (active) sparkle(ctx,x-cam+4,y-55+Math.sin(t*.1)*3,5,"#f9ffc2");
   }
   if (selected===0 && cam<315) {
     rect(ctx,203-cam,367,4,27,"#815778");
@@ -650,19 +724,21 @@ function drawBoss(t) {
   ctx.globalAlpha=1;
   for (let i=0;i<6;i++) {
     const a=i*Math.PI/3+t*.016;
-    sparkle(ctx,x+Math.cos(a)*93,b.y-33+Math.sin(a)*83,i%2===0?7:4,i%2===0?"#ffb8e9":"#d4bbff");
+    sparkle(ctx,x+Math.cos(a)*93,b.y-33+Math.sin(a)*83,i%2===0?7:4,b.phase===3?"#ff5e80":i%2===0?"#ffb8e9":"#d4bbff");
   }
   if (bossImage.complete && bossImage.naturalWidth>0) {
     ctx.imageSmoothingEnabled=true;
     ctx.globalAlpha=b.flash?.62:1;
-    ctx.drawImage(bossImage,x-71,y,142,145);
+    if (b.phase===3) { ctx.shadowColor="#ff325a"; ctx.shadowBlur=16; }
+    ctx.drawImage(b.phase===3 && enragedBossImage?enragedBossImage:bossImage,x-71,y,142,145);
+    ctx.shadowBlur=0;
     ctx.globalAlpha=1;
     ctx.imageSmoothingEnabled=false;
   }
   if (b.frame<213 && mode!=="title") {
     ctx.beginPath();
     ctx.ellipse(x,b.y-32,82,87,0,0,Math.PI*2);
-    ctx.strokeStyle="#e1b4f0a0";
+    ctx.strokeStyle=b.phase===3?"#ff8096d0":"#e1b4f0a0";
     ctx.lineWidth=2;
     ctx.stroke();
   }
@@ -685,6 +761,7 @@ function drawBoss(t) {
 }
 
 refreshSound();
+initChallengeControls();
 setupTitle();
 let previous=0, accumulator=0;
 function frame(time) {

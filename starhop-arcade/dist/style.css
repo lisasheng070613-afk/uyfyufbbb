@@ -134,3 +134,59 @@ ol { display:grid; gap:6px; list-style:none; margin:0; padding:0 }
 @media (max-width:720px) { .layout { grid-template-columns:1fr; padding:14px 12px 0 } .top-inner { padding:0 13px; height:59px } .main-column { gap:12px } .screen-bar { height:40px } .screen-footer { min-height:30px } .worlds { padding:13px } ol { grid-template-columns:repeat(2,minmax(0,1fr)) } }
 @media (max-width:470px) { .screen { margin:0 4px } .title-overlay { padding-left:5% } .overlay p { font-size:11px; margin:9px 0 12px; letter-spacing:0 } .title-eyebrow { margin-bottom:7px; font-size:8px; padding:4px 6px } .primary,.secondary { min-height:34px; min-width:0; padding:0 9px; font-size:12px; gap:5px } .screen-footer { padding:0 9px; font-size:9px } .controls { padding:8px 11px } .control-items { gap:7px } .control-items>div { font-size:10px; gap:4px } kbd { min-width:20px; padding:0 4px; height:22px } .hud,.boss-hud { top:6px } .hud { left:6px } .boss-hud { right:6px } }
 @media (prefers-reduced-motion:reduce) { *,*::before,*::after { animation-duration:0s !important; transition-duration:0s !important } }
+
+.interaction {
+  position:absolute; z-index:2; bottom:9%; left:50%; transform:translateX(-50%);
+  display:flex; align-items:center; gap:8px; max-width:94%; white-space:nowrap;
+  padding:5px 10px 5px 5px; border:1px solid #ab8ecd; border-radius:7px;
+  background:#231637f2; color:#f7eaff; font-size:12px; font-weight:800; pointer-events:none;
+}
+.interaction kbd { color:var(--lime); height:23px; min-width:23px }
+.oxygen {
+  position:absolute; top:13px; right:13px; z-index:2;
+  width:min(29%,170px); min-width:95px; padding:7px 8px;
+  border:1px solid #64bfc6; border-radius:7px; background:#102b42ec; color:#d1ffef;
+}
+.oxygen>div:first-child { display:flex; justify-content:space-between; align-items:center; font-size:11px; gap:4px; margin-bottom:5px }
+.oxygen span { font:800 11px ui-monospace,monospace }
+.oxygen-track { height:5px; border-radius:4px; overflow:hidden; background:#284f65 }
+.oxygen-track i { display:block; height:100%; width:100%; background:#8cf4dc }
+.oxygen.low { color:#ffc3b6; border-color:#ec867d }
+.oxygen.low i { background:#ff8e82 }
+.boss-hud.rage { border-color:#ff6b86; background:#431d35f2 }
+.boss-hud.rage .boss-track i { background:#ff5775 }
+.rhythm { position:absolute; inset:0; z-index:3; display:grid; place-items:center; padding:7px; background:#21162cd9 }
+.rhythm-card { width:min(90%,370px); display:grid; gap:8px; padding:14px 17px; background:#2d223d; border:1px solid #af8baf; border-radius:12px; box-shadow:0 12px 42px #150d27b3 }
+.rhythm-header,.rhythm-bottom { display:flex; align-items:center; justify-content:space-between; gap:7px }
+.rhythm-header h2 { font-size:18px; margin-top:2px }
+.rhythm-card p { font-size:12px; color:#d4bed9; margin:0 }
+.rhythm-progress { display:flex; gap:4px }
+.rhythm-progress i { width:8px; height:8px; border-radius:2px; background:#594462 }
+.rhythm-progress .hit { background:var(--lime) }
+.rhythm-lanes { display:grid; grid-template-columns:repeat(4,1fr); gap:5px; height:clamp(86px,24vw,200px); overflow:hidden; border-radius:6px }
+.rhythm-lane { --lane:#ddaff4; position:relative; background:linear-gradient(#37274b,#241930); border-left:1px solid #654e76; border-right:1px solid #654e76 }
+.rhythm-lane:nth-child(2) { --lane:#a4eafa }
+.rhythm-lane:nth-child(3) { --lane:#dcf995 }
+.rhythm-lane:nth-child(4) { --lane:#ffb7ce }
+.rhythm-lane:focus-within { border-color:var(--lane) }
+.rhythm-lane button,.rhythm-note { display:grid; place-items:center; height:28px; width:76%; position:absolute; left:12%; transform:translateY(-50%); font:800 22px ui-monospace,monospace; border-radius:5px }
+.rhythm-note { color:#2a1f38; background:var(--lane); pointer-events:none }
+.rhythm-lane button { z-index:1; top:81%; color:var(--lane); background:#181127e8; border:2px solid var(--lane); padding:0; touch-action:manipulation }
+.rhythm-lane button[data-result="hit"] { background:var(--lane); color:#22182e; box-shadow:0 0 12px var(--lane) }
+.rhythm-lane button[data-result="miss"] { color:#ffc2cf; border-color:#ff647d; background:#522639 }
+.rhythm-bottom { height:26px; color:var(--lime); font-size:12px; font-weight:800 }
+.rhythm-bottom button { background:#412c53; border:1px solid #775b88; border-radius:5px; padding:2px 8px; font-size:11px }
+@media (max-width:470px) {
+  .oxygen { top:6px; right:6px; padding:4px 6px }
+  .interaction { font-size:10px; padding:3px 7px 3px 3px }
+  .interaction kbd { height:18px; min-width:18px }
+  .rhythm-card { width:95%; gap:3px; padding:5px 7px }
+  .rhythm-header h2 { font-size:14px }
+  .rhythm-card p,.rhythm-bottom { font-size:10px }
+  .rhythm-bottom { height:21px }
+  .rhythm-lane button,.rhythm-note { font-size:15px; height:20px }
+  .touch { gap:4px; padding-inline:5px }
+  .touch>div { gap:3px }
+  .touch button { min-width:32px; padding:0 4px }
+}
+.rhythm-actions { display:flex; gap:5px }

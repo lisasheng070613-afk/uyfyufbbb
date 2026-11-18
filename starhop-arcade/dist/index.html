@@ -8,6 +8,7 @@
   <title>星跃冒险 · STARHOP ARCADE</title>
   <link rel="stylesheet" href="./style.css">
   <script src="./worlds.js" defer></script>
+  <script src="./challenges.js" defer></script>
   <script src="./game.js" defer></script>
 </head>
 <body>
@@ -41,13 +42,34 @@
           <div class="screen-tools"><span class="screen-state" id="status">待机</span><button class="tool pause" id="pause" type="button" aria-label="暂停" title="暂停 (Esc)" hidden><svg><use href="#i-pause"/></svg></button></div>
         </header>
         <div class="screen" id="screen">
-          <canvas id="game" width="768" height="480" tabindex="0" aria-label="游戏画面。A 左移，D 右移，空格跳跃，鼠标左键攻击。"></canvas>
+          <canvas id="game" width="768" height="480" tabindex="0" aria-label="游戏画面。A 左移，D 右移，空格跳跃，鼠标左键攻击，E 交互。"></canvas>
           <div class="hud" id="hud" hidden>
             <div class="hearts" id="hearts"></div>
             <div class="hud-chip"><svg><use href="#i-star"/></svg><span id="stars">00</span></div>
           </div>
           <div class="boss-hud" id="bossHud" hidden><div><strong>星铃守卫</strong><span id="bossPhase"></span></div><div class="boss-track"><i id="bossFill"></i></div></div>
+          <div id="oxygen" class="oxygen" hidden>
+            <div><strong>氧气</strong><span id="oxygenValue">100%</span></div>
+            <div class="oxygen-track" id="oxygenTrack" role="progressbar" aria-label="氧气" aria-valuemin="0" aria-valuemax="100" aria-valuenow="100"><i id="oxygenFill"></i></div>
+          </div>
           <div class="toast" role="status" id="toast" hidden></div>
+          <div class="interaction" id="interaction" hidden><kbd>E</kbd><span id="interactionText"></span></div>
+          <section id="rhythm" class="rhythm" aria-labelledby="rhythmTitle" hidden>
+            <div class="rhythm-card">
+              <div class="rhythm-header">
+                <div><div class="small-label">CLOUD RUINS</div><h2 id="rhythmTitle">石板节奏</h2></div>
+                <div id="rhythmProgress" class="rhythm-progress" aria-label="命中进度"></div>
+              </div>
+              <p>箭头到达判定线时，按对应方向键或点箭头。</p>
+              <div id="rhythmLanes" class="rhythm-lanes">
+                <div class="rhythm-lane"><button data-arrow="ArrowLeft" aria-label="左">←</button></div>
+                <div class="rhythm-lane"><button data-arrow="ArrowDown" aria-label="下">↓</button></div>
+                <div class="rhythm-lane"><button data-arrow="ArrowUp" aria-label="上">↑</button></div>
+                <div class="rhythm-lane"><button data-arrow="ArrowRight" aria-label="右">→</button></div>
+              </div>
+              <div class="rhythm-bottom"><div id="rhythmFeedback" role="status"></div><div class="rhythm-actions"><button type="button" id="rhythmRetry" hidden>重试</button><button type="button" id="rhythmExit">退出</button></div></div>
+            </div>
+          </section>
           <div class="overlay title-overlay" id="overlay">
             <div class="overlay-content">
               <div class="title-eyebrow" id="eyebrow"><svg><use href="#i-star"/></svg><span>STARHOP ARCADE</span></div>
@@ -58,8 +80,8 @@
           </div>
         </div>
         <div class="touch" id="touch" hidden>
-          <div><button data-key="KeyA" aria-label="左移">◀</button><button data-key="KeyD" aria-label="右移">▶</button></div>
-          <div><button data-key="Space">跳跃</button><button data-key="Attack">攻击</button></div>
+          <div><button data-key="KeyA" aria-label="左移">◀</button><button data-key="KeyD" aria-label="右移">▶</button><button data-key="ArrowUp" data-swim hidden aria-label="上浮">▲</button><button data-key="ArrowDown" data-swim hidden aria-label="下潜">▼</button></div>
+          <div><button data-key="Space" id="touchJump">跳跃</button><button data-key="Attack" id="touchAttack">攻击</button><button data-key="KeyE">交互</button></div>
         </div>
         <footer class="screen-footer"><span><svg><use href="#i-star"/></svg> 收集星砂，抵达星门</span><span id="stageTag">横版冒险 <i></i> 08 关卡</span></footer>
       </section>
@@ -68,6 +90,7 @@
         <div class="control-items">
           <div><span class="keys"><kbd>A</kbd><kbd>D</kbd></span><span>左右移动</span></div>
           <div><span class="keys"><kbd class="space">SPACE</kbd></span><span>跳跃</span></div>
+          <div><span class="keys"><kbd>E</kbd></span><span>交互</span></div>
           <div><span class="keys"><kbd class="mouse"><svg><use href="#i-mouse"/></svg><span>左键</span></kbd></span><span>攻击</span></div>
         </div>
       </section>
